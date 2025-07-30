@@ -23,7 +23,7 @@ Hey there! This is a project I built to manage agents and distribute leads among
 ## How it all fits together (Workflow)
 
 ```mermaid
-flowchart TD
+graph TD
     subgraph Frontend
         A[Admin Login/Register]
         B[Dashboard]
@@ -64,15 +64,14 @@ flowchart TD
     K --> N
 ```
 
-    A -->|Login/Register (Dashboard)| H
-    B -->|Add Agents (Dashboard)| C
-    D -->|Upload Leads File (Dashboard)| J
-    F -->|View/Download/Delete Distributions (Dashboard)| K
 
 ## Getting Started (Setup)
 
 
 ### What you need first
+- Node.js (v14 or newer)
+- MongoDB (local or cloud)
+- npm (comes with Node)
 
 
 ### Backend (API)
@@ -101,6 +100,7 @@ flowchart TD
    ```
 2. The app should open at [http://localhost:3000](http://localhost:3000)
 
+### Database
 - By default, it uses a local MongoDB. You can use MongoDB Atlas if you want—just update the URI in your `.env` file.
 
 
@@ -125,8 +125,18 @@ Jane,+1987654321,Interested in product
 Mike,+1122334455,
 ```
 Excel: Same columns, just save as .xlsx or .xls
+
+
+## API (for the curious)
+
+- `POST /api/auth/register` — Register admin
+- `POST /api/auth/login` — Login
 - `GET /api/agents` — List agents
 - `POST /api/agents` — Add agent
+- `POST /api/upload` — Upload and distribute file
+- ...and a few more for viewing/deleting distributions
+
+## Security & Notes
 - JWT tokens for login
 - Passwords are hashed
 - File uploads are checked for type/size
@@ -153,8 +163,14 @@ mern-agent-management/
       App.js
       index.js
     package.json
+  README.md
+```
+
+## Troubleshooting (Stuff that might go wrong)
 - MongoDB not running? Start it up or check your URI.
 - File upload fails? Check the format and size.
+- Auth not working? Try clearing your browser storage or check your .env secrets.
+- Port in use? Change it in the config.
 
 ## Demo Credentials
 - Email: `admin@example.com`
