@@ -49,16 +49,16 @@ const uploadService = {
     return response;
   },
 
-  // Get all distributions
-  getAllDistributions: async () => {
-    const response = await api.get('/upload/distributions');
-    return response;
-  },
-
-  // Get distributions for a specific agent
-  getAgentDistributions: async (agentId) => {
-    const response = await api.get(`/upload/distributions/${agentId}`);
-    return response;
+  // Get all distributions with optional agent filter
+  getAllDistributions: async (agentId = null) => {
+    try {
+      const url = agentId ? `/upload/distributions?agentId=${agentId}` : '/upload/distributions';
+      const response = await api.get(url);
+      return response;
+    } catch (error) {
+      console.error('API Error:', error);
+      throw error;
+    }
   },
 
   // Delete a distribution

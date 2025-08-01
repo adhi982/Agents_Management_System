@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const Agent = require('../models/Agent');
+const User = require('../models/User');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -26,18 +26,57 @@ router.post('/', auth, [
     const { name, email, mobileNumber, password } = req.body;
 
     // Check if agent already exists
-    let agent = await Agent.findOne({ email });
+    let agent = await User.findOne({ email });
     if (agent) {
       return res.status(400).json({ message: 'Agent with this email already exists' });
     }
 
-    // Create new agent
-    agent = new Agent({
+    // Determine role based on current user's role
+    let role, agentNumber;
+    if (req.user.role === 'admin') {
+      // Admin creates agents
+      role = 'agent';
+      
+      // Generate next agent number for agents
+      const lastAgent = await User.findOne({ role: 'agent' }).sort({ agentNumber: -1 });
+      if (lastAgent && lastAgent.agentNumber) {
+        // Extract number from last agent number (e.g., AGT005 -> 5)
+        const lastNumber = parseInt(lastAgent.agentNumber.replace('AGT', ''));
+        agentNumber = `AGT${String(lastNumber + 1).padStart(3, '0')}`;
+      } else {
+        // Start with AGT001 if no agents exist
+        agentNumber = 'AGT001';
+      }
+    } else if (req.user.role === 'agent') {
+      // Agent creates sub-agents
+      role = 'sub-agent';
+      // Sub-agents don't need agent numbers
+      agentNumber = undefined;
+    } else {
+      return res.status(403).json({ message: 'Unauthorized to create users' });
+    }
+
+    // Create new user
+    const userData = {
       name,
       email,
       mobileNumber,
-      password
-    });
+      password,
+      role,
+      createdBy: req.user.id
+    };
+
+    // Add agent number only for agents
+    if (agentNumber) {
+      userData.agentNumber = agentNumber;
+    }
+
+    // Add managedBy for sub-agents
+    if (role === 'sub-agent') {
+      userData.managedBy = req.user.id;
+    }
+
+    agent = new User(userData);
 
     await agent.save();
 
@@ -46,7 +85,7 @@ router.post('/', auth, [
     delete agentResponse.password;
 
     res.status(201).json({
-      message: 'Agent created successfully',
+      message: `${role === 'agent' ? 'Agent' : 'Sub-agent'} created successfully`,
       agent: agentResponse
     });
 
@@ -57,14 +96,36 @@ router.post('/', auth, [
 });
 
 // @route   GET /api/agents
-// @desc    Get all agents
-// @access  Private (Admin only)
+// @desc    Get all agents/sub-agents based on user role
+// @access  Private
 router.get('/', auth, async (req, res) => {
   try {
-    const agents = await Agent.find().select('-password').sort({ createdAt: -1 });
+    let query = {};
+    
+    if (req.user.role === 'admin') {
+      // Admin sees agents they created
+      query = {
+        role: 'agent',
+        createdBy: req.user.id 
+      };
+    } else if (req.user.role === 'agent') {
+      // Agent sees sub-agents they manage
+      query = {
+        role: 'sub-agent',
+        managedBy: req.user.id 
+      };
+    } else {
+      return res.status(403).json({ message: 'Unauthorized to view users' });
+    }
+
+    const agents = await User.find(query)
+      .select('-password')
+      .populate('createdBy', 'name email')
+      .populate('managedBy', 'name email')
+      .sort({ createdAt: -1 });
     
     res.json({
-      message: 'Agents retrieved successfully',
+      message: `${req.user.role === 'admin' ? 'Agents' : 'Sub-agents'} retrieved successfully`,
       agents,
       count: agents.length
     });
@@ -76,14 +137,18 @@ router.get('/', auth, async (req, res) => {
 });
 
 // @route   GET /api/agents/:id
-// @desc    Get agent by ID
+// @desc    Get agent by ID (only if created by current admin)
 // @access  Private (Admin only)
 router.get('/:id', auth, async (req, res) => {
   try {
-    const agent = await Agent.findById(req.params.id).select('-password');
+    const agent = await User.findOne({ 
+      _id: req.params.id, 
+      role: 'agent',
+      createdBy: req.user.id 
+    }).select('-password').populate('createdBy', 'name email');
     
     if (!agent) {
-      return res.status(404).json({ message: 'Agent not found' });
+      return res.status(404).json({ message: 'Agent not found or access denied' });
     }
 
     res.json({
@@ -98,8 +163,8 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 // @route   PUT /api/agents/:id
-// @desc    Update agent
-// @access  Private (Admin only)
+// @desc    Update agent/sub-agent based on user role
+// @access  Private
 router.put('/:id', auth, [
   body('name').optional().notEmpty().withMessage('Name cannot be empty'),
   body('email').optional().isEmail().normalizeEmail().withMessage('Valid email is required'),
@@ -116,35 +181,63 @@ router.put('/:id', auth, [
 
     const { name, email, mobileNumber, isActive } = req.body;
     
-    const agent = await Agent.findById(req.params.id);
+    // Find the user based on current user's role
+    let targetUser;
+    if (req.user.role === 'admin') {
+      // Admin can update agents they created
+      targetUser = await User.findOne({ 
+        _id: req.params.id, 
+        role: 'agent',
+        createdBy: req.user.id 
+      });
+    } else if (req.user.role === 'agent') {
+      // Agent can update sub-agents they manage
+      targetUser = await User.findOne({ 
+        _id: req.params.id, 
+        role: 'sub-agent',
+        managedBy: req.user.id 
+      });
+    } else {
+      return res.status(403).json({ message: 'Unauthorized to update users' });
+    }
     
-    if (!agent) {
-      return res.status(404).json({ message: 'Agent not found' });
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found or access denied' });
     }
 
     // Check if email is being changed and if it already exists
-    if (email && email !== agent.email) {
-      const existingAgent = await Agent.findOne({ email });
-      if (existingAgent) {
-        return res.status(400).json({ message: 'Agent with this email already exists' });
+    if (email && email !== targetUser.email) {
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({ message: 'User with this email already exists' });
       }
     }
 
     // Update fields
-    if (name) agent.name = name;
-    if (email) agent.email = email;
-    if (mobileNumber) agent.mobileNumber = mobileNumber;
-    if (typeof isActive === 'boolean') agent.isActive = isActive;
+    if (name) targetUser.name = name;
+    if (email) targetUser.email = email;
+    if (mobileNumber) targetUser.mobileNumber = mobileNumber;
+    
+    // Handle isActive more robustly
+    if ('isActive' in req.body) {
+      const newStatus = req.body.isActive;
+      // Convert string 'true'/'false' to boolean if needed
+      if (typeof newStatus === 'string') {
+        targetUser.isActive = newStatus.toLowerCase() === 'true';
+      } else if (typeof newStatus === 'boolean') {
+        targetUser.isActive = newStatus;
+      }
+    }
 
-    await agent.save();
+    await targetUser.save();
 
     // Remove password from response
-    const agentResponse = agent.toObject();
-    delete agentResponse.password;
+    const userResponse = targetUser.toObject();
+    delete userResponse.password;
 
     res.json({
-      message: 'Agent updated successfully',
-      agent: agentResponse
+      message: `${targetUser.role === 'agent' ? 'Agent' : 'Sub-agent'} updated successfully`,
+      agent: userResponse
     });
 
   } catch (error) {
@@ -154,20 +247,38 @@ router.put('/:id', auth, [
 });
 
 // @route   DELETE /api/agents/:id
-// @desc    Delete agent
-// @access  Private (Admin only)
+// @desc    Delete agent/sub-agent based on user role
+// @access  Private
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const agent = await Agent.findById(req.params.id);
+    // Find the user based on current user's role
+    let targetUser;
+    if (req.user.role === 'admin') {
+      // Admin can delete agents they created
+      targetUser = await User.findOne({ 
+        _id: req.params.id, 
+        role: 'agent',
+        createdBy: req.user.id 
+      });
+    } else if (req.user.role === 'agent') {
+      // Agent can delete sub-agents they manage
+      targetUser = await User.findOne({ 
+        _id: req.params.id, 
+        role: 'sub-agent',
+        managedBy: req.user.id 
+      });
+    } else {
+      return res.status(403).json({ message: 'Unauthorized to delete users' });
+    }
     
-    if (!agent) {
-      return res.status(404).json({ message: 'Agent not found' });
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found or access denied' });
     }
 
-    await Agent.findByIdAndDelete(req.params.id);
+    await User.findByIdAndDelete(req.params.id);
 
     res.json({
-      message: 'Agent deleted successfully'
+      message: `${targetUser.role === 'agent' ? 'Agent' : 'Sub-agent'} deleted successfully`
     });
 
   } catch (error) {

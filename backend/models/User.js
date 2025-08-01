@@ -2,6 +2,11 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
   email: {
     type: String,
     required: true,
@@ -14,10 +19,41 @@ const userSchema = new mongoose.Schema({
     required: true,
     minlength: 6
   },
+  mobileNumber: {
+    type: String,
+    required: true,
+    trim: true
+  },
   role: {
     type: String,
-    enum: ['admin', 'agent'],
-    default: 'admin'
+    enum: ['admin', 'agent', 'sub-agent'],
+    default: 'sub-agent'
+  },
+  agentNumber: {
+    type: String,
+    unique: true,
+    sparse: true, // Only required for agents
+    required: function() {
+      return this.role === 'agent';
+    }
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() {
+      return this.role !== 'admin'; // Only admins don't need createdBy
+    }
+  },
+  managedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() {
+      return this.role === 'sub-agent'; // Sub-agents need to be managed by someone
+    }
   }
 }, {
   timestamps: true

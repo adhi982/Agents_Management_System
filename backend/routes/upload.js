@@ -4,7 +4,8 @@ const csv = require('csv-parser');
 const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
-const Agent = require('../models/Agent');
+const mongoose = require('mongoose');
+const User = require('../models/User');
 const DistributedList = require('../models/DistributedList');
 const auth = require('../middleware/auth');
 
@@ -173,17 +174,42 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
       });
     }
 
-    // Get all active agents
-    const agents = await Agent.find({ isActive: true });
+    // Get all active users based on current user's role
+    let targetUsers;
+    let targetRole;
     
-    if (agents.length === 0) {
+    if (req.user.role === 'admin') {
+      // Admin distributes to active agents they created
+      targetUsers = await User.find({ 
+        role: 'agent',
+        isActive: true, 
+        createdBy: req.user.id 
+      });
+      targetRole = 'agents';
+    } else if (req.user.role === 'agent') {
+      // Agent distributes to active sub-agents they manage
+      targetUsers = await User.find({ 
+        role: 'sub-agent',
+        isActive: true, 
+        managedBy: req.user.id 
+      });
+      targetRole = 'sub-agents';
+    } else {
       // Clean up uploaded file
       fs.unlinkSync(filePath);
-      return res.status(400).json({ message: 'No active agents found. Please create agents first.' });
+      return res.status(403).json({ message: 'Unauthorized to distribute work.' });
+    }
+    
+    if (targetUsers.length === 0) {
+      // Clean up uploaded file
+      fs.unlinkSync(filePath);
+      return res.status(400).json({ 
+        message: `No active ${targetRole} found. Please create ${targetRole} first.` 
+      });
     }
 
-    // Distribute items among agents
-    const distribution = distributeItemsAmongAgents(parsedData, agents);
+    // Distribute items among target users
+    const distribution = distributeItemsAmongAgents(parsedData, targetUsers);
 
     // Save distributed lists to database
     const savedDistributions = [];
@@ -192,6 +218,7 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
         agentId: dist.agentId,
         agentName: dist.agentName,
         agentEmail: dist.agentEmail,
+        createdBy: req.user.id,
         items: dist.items,
         fileName: req.file.originalname,
         totalItems: dist.items.length
@@ -207,7 +234,8 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
     res.json({
       message: 'File uploaded and distributed successfully',
       totalItems: parsedData.length,
-      totalAgents: agents.length,
+      totalAgents: targetUsers.length,
+      targetRole: targetRole,
       distributions: savedDistributions.map(dist => ({
         agentId: dist.agentId,
         agentName: dist.agentName,
@@ -229,12 +257,59 @@ router.post('/', auth, upload.single('file'), async (req, res) => {
 });
 
 // @route   GET /api/upload/distributions
-// @desc    Get all distributed lists
-// @access  Private (Admin only)
+// @desc    Get all distributed lists (Admin sees agent distributions, Agent sees sub-agent distributions)
+// @access  Private
 router.get('/distributions', auth, async (req, res) => {
   try {
-    const distributions = await DistributedList.find()
+    const { agentId } = req.query;
+    let query = { createdBy: req.user.id };
+    
+    // Only add agentId to query if it's provided and not 'all'
+    if (agentId && agentId !== 'all') {
+      try {
+        // Handle the case where agentId might be a string 'null'
+        if (agentId === 'null') {
+          return res.json({
+            message: 'Distributions retrieved successfully',
+            distributions: []
+          });
+        }
+        
+        // Verify the target user belongs to current user based on role
+        let targetUser;
+        if (req.user.role === 'admin') {
+          targetUser = await User.findOne({ 
+            _id: mongoose.Types.ObjectId(agentId), 
+            role: 'agent',
+            createdBy: req.user.id 
+          });
+        } else if (req.user.role === 'agent') {
+          targetUser = await User.findOne({ 
+            _id: mongoose.Types.ObjectId(agentId), 
+            role: 'sub-agent',
+            managedBy: req.user.id 
+          });
+        }
+        
+        if (!targetUser) {
+          return res.status(403).json({ 
+            message: 'Access denied. User not found or not managed by you.' 
+          });
+        }
+        
+        query.agentId = mongoose.Types.ObjectId(agentId);
+      } catch (error) {
+        console.error('Invalid agent ID:', agentId);
+        return res.status(400).json({ 
+          message: 'Invalid agent ID format',
+          error: error.message 
+        });
+      }
+    }
+    
+    const distributions = await DistributedList.find(query)
       .populate('agentId', 'name email mobileNumber isActive')
+      .populate('createdBy', 'name email')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -249,12 +324,38 @@ router.get('/distributions', auth, async (req, res) => {
 });
 
 // @route   GET /api/upload/distributions/:agentId
-// @desc    Get distributed lists for a specific agent
-// @access  Private (Admin only)
+// @desc    Get distributed lists for a specific agent/sub-agent
+// @access  Private
 router.get('/distributions/:agentId', auth, async (req, res) => {
   try {
-    const distributions = await DistributedList.find({ agentId: req.params.agentId })
+    // Verify the target user belongs to current user based on role
+    let targetUser;
+    if (req.user.role === 'admin') {
+      targetUser = await User.findOne({ 
+        _id: req.params.agentId, 
+        role: 'agent',
+        createdBy: req.user.id 
+      });
+    } else if (req.user.role === 'agent') {
+      targetUser = await User.findOne({ 
+        _id: req.params.agentId, 
+        role: 'sub-agent',
+        managedBy: req.user.id 
+      });
+    }
+    
+    if (!targetUser) {
+      return res.status(403).json({ 
+        message: 'Access denied. User not found or not managed by you.' 
+      });
+    }
+    
+    const distributions = await DistributedList.find({ 
+      agentId: req.params.agentId,
+      createdBy: req.user.id 
+    })
       .populate('agentId', 'name email mobileNumber isActive')
+      .populate('createdBy', 'name email')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -273,10 +374,13 @@ router.get('/distributions/:agentId', auth, async (req, res) => {
 // @access  Private (Admin only)
 router.delete('/distributions/:id', auth, async (req, res) => {
   try {
-    const distribution = await DistributedList.findById(req.params.id);
+    const distribution = await DistributedList.findOne({ 
+      _id: req.params.id,
+      createdBy: req.user.id 
+    });
     
     if (!distribution) {
-      return res.status(404).json({ message: 'Distribution not found' });
+      return res.status(404).json({ message: 'Distribution not found or access denied' });
     }
 
     await DistributedList.findByIdAndDelete(req.params.id);

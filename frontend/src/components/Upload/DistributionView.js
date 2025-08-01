@@ -1,29 +1,49 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-toastify';
 import uploadService from '../../services/uploadService';
+import agentService from '../../services/agentService';
+import { useAuth } from '../../context/AuthContext';
 
 const DistributionView = () => {
   const [distributions, setDistributions] = useState([]);
+  const [availableAgents, setAvailableAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState('all');
   const [expandedDistribution, setExpandedDistribution] = useState(null);
+  const { user } = useAuth();
+
+  // Filter distributions based on selected agent
+  const filteredDistributions = useMemo(() => {
+    if (selectedAgent === 'all') {
+      return distributions;
+    }
+    return distributions.filter(dist => String(dist.agentId) === String(selectedAgent));
+  }, [distributions, selectedAgent]);
 
   useEffect(() => {
-    fetchDistributions();
-  }, []);
-
-  const fetchDistributions = async () => {
-    try {
-      setLoading(true);
-      const response = await uploadService.getAllDistributions();
-      setDistributions(response.distributions);
-    } catch (error) {
-      console.error('Error fetching distributions:', error);
-      toast.error('Failed to fetch distributions');
-    } finally {
-      setLoading(false);
-    }
-  };
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch available agents/sub-agents based on user role
+        const agentsResponse = await agentService.getAllAgents();
+        setAvailableAgents(agentsResponse.agents || []);
+        
+        // Fetch all distributions (we'll filter them locally)
+        const distributionsResponse = await uploadService.getAllDistributions();
+        setDistributions(distributionsResponse.distributions || []);
+        
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        toast.error('Failed to fetch data');
+        setDistributions([]);
+        setAvailableAgents([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []); // Remove selectedAgent dependency since we're filtering locally now
 
   const handleDeleteDistribution = async (distributionId) => {
     if (!window.confirm('Are you sure you want to delete this distribution?')) {
@@ -46,23 +66,6 @@ const DistributionView = () => {
     );
   };
 
-  // Get unique agents for filter
-  const uniqueAgents = distributions.reduce((acc, dist) => {
-    if (!acc.find(agent => agent.id === dist.agentId)) {
-      acc.push({
-        id: dist.agentId,
-        name: dist.agentName,
-        email: dist.agentEmail
-      });
-    }
-    return acc;
-  }, []);
-
-  // Filter distributions based on selected agent
-  const filteredDistributions = selectedAgent === 'all' 
-    ? distributions 
-    : distributions.filter(dist => dist.agentId === selectedAgent);
-
   if (loading) {
     return (
       <div className="loading">
@@ -77,7 +80,7 @@ const DistributionView = () => {
         <h2>Distribution History</h2>
         <div>
           <label htmlFor="agentFilter" className="form-label mr-2">
-            Filter by Agent:
+            Filter by {user?.role === 'admin' ? 'Agent' : 'Sub-Agent'}:
           </label>
           <select
             id="agentFilter"
@@ -86,9 +89,9 @@ const DistributionView = () => {
             onChange={(e) => setSelectedAgent(e.target.value)}
             style={{ width: 'auto', display: 'inline-block' }}
           >
-            <option value="all">All Agents</option>
-            {uniqueAgents.map(agent => (
-              <option key={agent.id} value={agent.id}>
+            <option key="all-agents" value="all">All {user?.role === 'admin' ? 'Agents' : 'Sub-Agents'}</option>
+            {availableAgents.map(agent => (
+              <option key={`agent-${agent._id}`} value={agent._id}>
                 {agent.name} ({agent.email})
               </option>
             ))}
@@ -161,7 +164,7 @@ const DistributionView = () => {
                         </thead>
                         <tbody>
                           {distribution.items.map((item, index) => (
-                            <tr key={index}>
+                            <tr key={`item-${distribution._id}-${index}`}>
                               <td>{index + 1}</td>
                               <td>{item.firstName}</td>
                               <td>{item.phone}</td>

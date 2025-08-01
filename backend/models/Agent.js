@@ -27,6 +27,24 @@ const agentSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  managedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: function() {
+      // If created by a manager, they should be managed by that manager
+      return true;
+    }
+  },
+  role: {
+    type: String,
+    enum: ['agent', 'sub-agent'],
+    default: 'sub-agent'
   }
 }, {
   timestamps: true

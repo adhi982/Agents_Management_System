@@ -1,11 +1,11 @@
 import React from 'react';
 
-const AgentList = ({ agents, onEdit, onDelete }) => {
+const AgentList = ({ agents, onEdit, onDelete, onToggleStatus }) => {
   if (agents.length === 0) {
     return (
       <div className="text-center" style={{ padding: '3rem' }}>
         <h4 style={{ fontSize: '1.25rem', fontWeight: '600' }}>No agents found</h4>
-        <p className="text-muted">Create your first agent to get started.</p>
+        <p className="text-muted">Create your first agent to get started. Only agents you create will be visible here.</p>
       </div>
     );
   }
@@ -13,13 +13,14 @@ const AgentList = ({ agents, onEdit, onDelete }) => {
   return (
     <div>
       <h3 style={{ fontSize: '1.125rem', fontWeight: '600' }}>
-        All Agents ({agents.length})
+        Your Agents ({agents.length})
       </h3>
       <div className="table-responsive">
         <table className="table">
           <thead>
             <tr>
               <th>Name</th>
+              <th>Agent Number</th>
               <th>Email</th>
               <th>Mobile Number</th>
               <th>Status</th>
@@ -31,12 +32,21 @@ const AgentList = ({ agents, onEdit, onDelete }) => {
             {agents.map((agent) => (
               <tr key={agent._id}>
                 <td>{agent.name}</td>
+                <td>
+                  <span className="badge badge-info">
+                    {agent.agentNumber || 'N/A'}
+                  </span>
+                </td>
                 <td>{agent.email}</td>
                 <td>{agent.mobileNumber}</td>
                 <td>
-                  <span className={`badge ${agent.isActive ? 'badge-success' : 'badge-danger'}`}>
+                  <button
+                    className={`btn btn-sm ${agent.isActive ? 'btn-success' : 'btn-danger'}`}
+                    onClick={() => onToggleStatus(agent._id, !agent.isActive)}
+                    style={{ minWidth: '80px' }}
+                  >
                     {agent.isActive ? 'Active' : 'Inactive'}
-                  </span>
+                  </button>
                 </td>
                 <td>
                   {new Date(agent.createdAt).toLocaleDateString()}
@@ -44,16 +54,16 @@ const AgentList = ({ agents, onEdit, onDelete }) => {
                 <td>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
-                      className="btn btn-secondary"
+                      className="btn btn-secondary btn-sm"
                       onClick={() => onEdit(agent)}
-                      style={{ padding: '0.5rem 1rem' }}
+                      style={{ padding: '0.25rem 0.5rem' }}
                     >
                       Edit
                     </button>
                     <button
-                      className="btn btn-danger"
+                      className="btn btn-danger btn-sm"
                       onClick={() => onDelete(agent._id)}
-                      style={{ padding: '0.5rem 1rem' }}
+                      style={{ padding: '0.25rem 0.5rem' }}
                     >
                       Delete
                     </button>

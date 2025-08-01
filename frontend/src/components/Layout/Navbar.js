@@ -26,9 +26,10 @@ const Navbar = () => {
             <div className="navbar-user">
               <div className="user-info">
                 <div className="user-avatar">
-                  {user?.email?.charAt(0).toUpperCase()}
+                  {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
                 </div>
                 <div className="user-details">
+                  <span className="user-name">{user?.name || 'Admin'}</span>
                   <span className="user-email">{user?.email}</span>
                   <span className="user-role">Administrator</span>
                 </div>
